@@ -96,17 +96,19 @@ const TimeBaseConfigurations &ClockManager::get_timebase_cfgs()
 }
 
 bool ClockManager::subscribe_by_name(const ClkMgrSubscription &newSub,
-    const string &timeBaseName, Event_state &currentState)
+    const string &timeBaseName,
+    std::map<std::string, std::shared_ptr<ClockSyncBase>> &clockSyncMap)
 {
     size_t timeBaseIndex = 0;
     if(!TimeBaseConfigurations::BaseNameToBaseIndex(timeBaseName, timeBaseIndex)) {
         PrintDebug("[SUBSCRIBE] Invalid timeBaseName.");
         return false;
     }
-    return subscribe(newSub, timeBaseIndex, currentState);
+    return subscribe(newSub, timeBaseIndex, clockSyncMap);
 }
 bool ClockManager::subscribe(const ClkMgrSubscription &newSub,
-    size_t timeBaseIndex, Event_state &currentState)
+    size_t timeBaseIndex,
+    std::map<std::string, std::shared_ptr<ClockSyncBase>> &clockSyncMap)
 {
     // Check whether connection between Proxy and Client is established or not
     if(!implClientState.get_connected()) {
@@ -155,7 +157,30 @@ bool ClockManager::subscribe(const ClkMgrSubscription &newSub,
         PrintDebug("[SUBSCRIBE] Failed to get specific timebase state.");
         return false;
     }
-    currentState = state.get_eventState();
+    /* Get the PTPClockSync reference from TimeBaseState */
+    PTPClockSync &ptpData = state.get_ptp4lEventState();
+    /* Copy data from ptpData to the map */
+    auto ptpSync = std::make_shared<PTPClockSync>();
+    ptpSync->setNotificationTimestamp(ptpData.getNotificationTimestamp());
+    ptpSync->setClockOffset(ptpData.getClockOffset());
+    ptpSync->setGmIdentity(ptpData.getGmIdentity());
+    ptpSync->setOffsetInRange(ptpData.isOffsetInRange());
+    ptpSync->setGmChanged(ptpData.isGmChanged());
+    ptpSync->setSyncedToPrimaryClock(ptpData.isSyncedToPrimaryClock());
+    ptpSync->setAsCapable(ptpData.isAsCapable());
+    ptpSync->setCompositeEvent(ptpData.isCompositeEvent());
+    /* Insert the PTPClockSync into the map */
+    clockSyncMap["PTP"] = ptpSync;
+    ChronyClockSync &chronydata = state.get_chronyEventState();
+    /* Copy data from chronyData to the map */
+    auto chronySync = std::make_shared<ChronyClockSync>();
+    chronySync->setNotificationTimestamp(chronydata.getNotificationTimestamp());
+    chronySync->setClockOffset(chronydata.getClockOffset());
+    chronySync->setGmIdentity(chronydata.getGmIdentity());
+    chronySync->setOffsetInRange(chronydata.isOffsetInRange());
+    chronySync->setGmChanged(chronydata.isGmChanged());
+    /* Insert the ChronyClockSync into the map */
+    clockSyncMap["Chrony"] = chronySync;
     return true;
 }
 
@@ -234,18 +259,20 @@ send_connect:
 }
 
 int ClockManager::status_wait_by_name(int timeout, const string &timeBaseName,
-    Event_state &currentState, Event_count &currentCount)
+    std::map<std::string, std::shared_ptr<ClockSyncBase>> &clockSyncMap,
+    std::map<std::string, std::shared_ptr<ClockSyncStateBase>> &clockSyncStateMap)
 {
     size_t timeBaseIndex = 0;
     if(!TimeBaseConfigurations::BaseNameToBaseIndex(timeBaseName, timeBaseIndex)) {
         PrintDebug("[SUBSCRIBE] Invalid timeBaseName.");
         return -1;
     }
-    return status_wait(timeout, timeBaseIndex, currentState, currentCount);
+    return status_wait(timeout, timeBaseIndex, clockSyncMap, clockSyncStateMap);
 }
 
 int ClockManager::status_wait(int timeout, size_t timeBaseIndex,
-    Event_state &currentState, Event_count &currentCount)
+    std::map<std::string, std::shared_ptr<ClockSyncBase>> &clockSyncMap,
+    std::map<std::string, std::shared_ptr<ClockSyncStateBase>> &clockSyncStateMap)
 {
     // Check whether connection between Proxy and Client is established or not
     if(!implClientState.get_connected()) {
@@ -282,9 +309,46 @@ int ClockManager::status_wait(int timeout, size_t timeBaseIndex,
         // Sleep for a short duration before the next iteration
         this_thread::sleep_for(milliseconds(10));
     } while(high_resolution_clock::now() < end);
-    /* Copy out the current state */
-    currentCount = state.get_eventStateCount();
-    currentState = state.get_eventState();
+    /* Copy out the ptp4l current state */
+    PTPStateCount &ptpCurrentcount = state.get_ptpEventStateCount();
+    auto ptpCount = std::make_shared<PTPStateCount>();
+    ptpCount->setOffsetInRangeEventCount(
+        ptpCurrentcount.getOffsetInRangeEventCount());
+    ptpCount->setGmChangedEventCount(ptpCurrentcount.getGmChangedEventCount());
+    ptpCount->setAsCapableEventCount(ptpCurrentcount.getAsCapableEventCount());
+    ptpCount->setSyncedToGmEventCount(ptpCurrentcount.getSyncedToGmEventCount());
+    ptpCount->setCompositeEventCount(ptpCurrentcount.getCompositeEventCount());
+    clockSyncStateMap["PTP"] = ptpCount;
+    /* Copy out the chrony current state */
+    ChronyStateCount &chronyCurrentcount = state.get_chronyEventStateCount();
+    auto chronyCount = std::make_shared<ChronyStateCount>();
+    chronyCount->setOffsetInRangeEventCount(
+        chronyCurrentcount.getOffsetInRangeEventCount());
+    clockSyncStateMap["Chrony"] = chronyCount;
+    /* Get the PTPClockSync reference from TimeBaseState */
+    PTPClockSync &ptpData = state.get_ptp4lEventState();
+    /* Copy data from ptpData to the map */
+    auto ptpSync = std::make_shared<PTPClockSync>();
+    ptpSync->setNotificationTimestamp(ptpData.getNotificationTimestamp());
+    ptpSync->setClockOffset(ptpData.getClockOffset());
+    ptpSync->setGmIdentity(ptpData.getGmIdentity());
+    ptpSync->setOffsetInRange(ptpData.isOffsetInRange());
+    ptpSync->setGmChanged(ptpData.isGmChanged());
+    ptpSync->setSyncedToPrimaryClock(ptpData.isSyncedToPrimaryClock());
+    ptpSync->setAsCapable(ptpData.isAsCapable());
+    ptpSync->setCompositeEvent(ptpData.isCompositeEvent());
+    /* Insert the PTPClockSync into the map */
+    clockSyncMap["PTP"] = ptpSync;
+    ChronyClockSync &chronydata = state.get_chronyEventState();
+    /* Copy data from chronyData to the map */
+    auto chronySync = std::make_shared<ChronyClockSync>();
+    chronySync->setNotificationTimestamp(chronydata.getNotificationTimestamp());
+    chronySync->setClockOffset(chronydata.getClockOffset());
+    chronySync->setGmIdentity(chronydata.getGmIdentity());
+    chronySync->setOffsetInRange(chronydata.isOffsetInRange());
+    chronySync->setGmChanged(chronydata.isGmChanged());
+    /* Insert the ChronyClockSync into the map */
+    clockSyncMap["Chrony"] = chronySync;
     if(!event_changes_detected)
         return 0;
     return 1;
